@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SigilAGI — GlyphMatics System</title>
+
+<style>
+body {
+  margin: 0;
+  font-family: monospace;
+  background: #0a0a0a;
+  color: #e5e5e5;
+}
+
+header {
+  padding: 20px;
+  background: #111;
+  border-bottom: 1px solid #222;
+}
+
+h1 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.container {
+  padding: 20px;
+}
+
+.panel {
+  background: #111;
+  border: 1px solid #222;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+button {
+  background: #222;
+  border: 1px solid #444;
+  color: #fff;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+input, textarea {
+  width: 100%;
+  background: #000;
+  color: #0f0;
+  border: 1px solid #333;
+  padding: 8px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(16, 1fr);
+  gap: 2px;
+}
+
+.cell {
+  width: 100%;
+  aspect-ratio: 1;
+  background: #111;
+  border: 1px solid #222;
+  font-size: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+img {
+  max-width: 100%;
+  border: 1px solid #222;
+}
+
+pre {
+  background: #000;
+  padding: 10px;
+  overflow-x: auto;
+}
+
+</style>
+</head>
+
+<body>
+
+<header>
+  <h1>SigilAGI — GlyphMatics / VIL Execution System</h1>
+</header>
+
+<div class="container">
+
+<!-- INPUT -->
+<div class="panel">
+  <h3>Run SigilAGI</h3>
+  <input id="input" value="who are you" />
+  <button onclick="run()">Execute</button>
+</div>
+
+<!-- RESPONSE -->
+<div class="panel">
+  <h3>Response</h3>
+  <div id="response"></div>
+</div>
+
+<!-- GLYPH LATTICE -->
+<div class="panel">
+  <h3>Glyph Lattice</h3>
+  <div id="lattice" class="grid"></div>
+</div>
+
+<!-- SIGIL IMAGE -->
+<div class="panel">
+  <h3>Tri-Sigil Output</h3>
+  <img id="sigil" />
+</div>
+
+<!-- INSPECT -->
+<div class="panel">
+  <h3>Inspect (Routing / VIL)</h3>
+  <pre id="inspect"></pre>
+</div>
+
+<!-- MODEL FAMILY -->
+<div class="panel">
+  <h3>Model Family Sigils</h3>
+  <select id="family">
+    <option>gpt</option>
+    <option>llama</option>
+    <option>qwen</option>
+    <option>gemma</option>
+    <option>mistral</option>
+    <option>deepseek</option>
+    <option>vil</option>
+    <option>sigilagi</option>
+  </select>
+  <button onclick="loadFamily()">Load</button>
+  <img id="familySigil" />
+</div>
+
+</div>
+
+<script>
+
+// 🔗 POINT THIS TO YOUR HF SPACE API
+const API = "https://nine1eight-vil-glyphmatic-demo.hf.space/run/predict";
+
+async function run() {
+  const text = document.getElementById("input").value;
+
+  const res = await fetch(API, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      data: [text, "web-session"]
+    })
+  });
+
+  const json = await res.json();
+  const out = json.data;
+
+  const response = out[0];
+  const lattice = out[1];
+  const inspect = out[2];
+
+  document.getElementById("response").innerText = response;
+
+  renderLattice(lattice);
+
+  try {
+    const obj = JSON.parse(inspect.replace(/'/g, '"'));
+    document.getElementById("inspect").innerText =
+      JSON.stringify(obj, null, 2);
+
+    if (obj.pipeline?.sigil?.png) {
+      document.getElementById("sigil").src =
+        obj.pipeline.sigil.png;
+    }
+  } catch {
+    document.getElementById("inspect").innerText = inspect;
+  }
+}
+
+function renderLattice(str) {
+  const grid = document.getElementById("lattice");
+  grid.innerHTML = "";
+
+  const tokens = str.match(/G\d+:\d+/g) || [];
+
+  tokens.slice(0, 256).forEach(t => {
+    const div = document.createElement("div");
+    div.className = "cell";
+    div.innerText = t;
+    grid.appendChild(div);
+  });
+}
+
+// Load prebuilt model-family sigils (from repo)
+function loadFamily() {
+  const f = document.getElementById("family").value;
+  document.getElementById("familySigil").src =
+    `model_family_sigils/${f}.png`;
+}
+
+</script>
+
+</body>
+</html>
