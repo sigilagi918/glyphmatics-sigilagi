@@ -2,6 +2,7 @@
 from collections import deque, defaultdict
 from pathlib import Path
 import json
+import sys
 import time
 
 from sigillm_numpy import (
@@ -21,6 +22,7 @@ from sigil_neural_model import NeuralGlyphModel
 REWARD_PATH = Path("backend_rewards.json")
 
 tok = GlyphTokenizer()
+
 model = NGramSigilLM()
 model.use_transformer = False
 model.transformer = None
@@ -37,21 +39,40 @@ SEED_BACKEND = "trainable"
 AUTO_BACKEND = False
 MEMORY = deque(maxlen=128)
 
+
 def load_rewards():
     if not REWARD_PATH.exists():
         return defaultdict(lambda: {"uses": 0, "reward": 0.0, "avg": 0.0})
+
     data = json.loads(REWARD_PATH.read_text())
     return defaultdict(lambda: {"uses": 0, "reward": 0.0, "avg": 0.0}, data)
 
+
 BACKEND_STATS = load_rewards()
+
 
 def save_rewards():
     REWARD_PATH.write_text(json.dumps(dict(BACKEND_STATS), indent=2))
 
+
+def safe_save():
+    try:
+        embedding_model.save()
+    except Exception:
+        pass
+
+    try:
+        save_rewards()
+    except Exception:
+        pass
+
+
 def reward_backend(backend, meta, text):
     reward = float(meta.get("score", 0.0))
+
     if meta.get("valid", False):
         reward += 0.25
+
     reward += min(float(meta.get("entropy", 0.0)) / 4.0, 1.0) * 0.25
 
     st = BACKEND_STATS[backend]
@@ -64,6 +85,7 @@ def reward_backend(backend, meta, text):
 
     save_rewards()
     return reward
+
 
 def parse_command(text):
     global CURRENT_TARGET, USE_NEURAL, SEED_BACKEND, AUTO_BACKEND
@@ -79,6 +101,7 @@ def parse_command(text):
         if backend not in ("hash", "trainable", "vil"):
             print("[SEED ERROR] use: /seed hash | /seed trainable | /seed vil")
             return True
+
         SEED_BACKEND = backend
         AUTO_BACKEND = False
         print("[SEED]", SEED_BACKEND)
@@ -120,48 +143,62 @@ def parse_command(text):
             "seed_backend": SEED_BACKEND,
             "auto_backend": AUTO_BACKEND,
             "neural": USE_NEURAL,
-            "backend_stats": dict(BACKEND_STATS)
+            "backend_stats": dict(BACKEND_STATS),
         }, indent=2))
         return True
 
     return False
+
 
 def inject_memory(seed):
     if not MEMORY:
         return seed
     return seed + list(MEMORY)[-8:]
 
+
 def trace(tokens, n=24):
     out = []
+
     for t in tokens:
         g = (int(t) >> 8) & 15
         b = int(t) & 255
+
         if g == 15:
             continue
+
         out.append(f"G{g}:{b:02X}")
+
         if len(out) >= n:
             break
+
     return " ".join(out)
+
 
 def generate(seed):
     if USE_NEURAL:
         tokens = list(seed)
+
         for _ in range(32):
             nxt = neural_model.next_token(tokens)
             tokens.append(nxt)
+
         return tokens
+
     return model.generate(seed)
+
 
 def score_tokens(tokens):
     if CURRENT_TARGET:
         return score(tokens, CURRENT_TARGET)
     return score(tokens)
 
+
 def run_backend(text, backend):
     seed = make_seed(text, backend=backend, start=START, n=8)
     seed = inject_memory(seed)
     tokens = generate(seed)
     meta = score_tokens(tokens)
+
     return {
         "backend": backend,
         "tokens": tokens,
@@ -169,8 +206,9 @@ def run_backend(text, backend):
         "entropy": round(meta["entropy"], 3),
         "score": round(meta["score"], 3),
         "length": meta["length"],
-        "trace": trace(tokens, n=12)
+        "trace": trace(tokens, n=12),
     }
+
 
 def compare_backends(text, verbose=True):
     rows = [run_backend(text, b) for b in ("hash", "trainable", "vil")]
@@ -179,14 +217,20 @@ def compare_backends(text, verbose=True):
     if verbose:
         print("[COMPARE]", text)
         for r in rows:
-            print(f"{r['backend']:10s} H={r['entropy']} score={r['score']} len={r['length']} trace={r['trace']}")
+            print(
+                f"{r['backend']:10s} "
+                f"H={r['entropy']} "
+                f"score={r['score']} "
+                f"len={r['length']} "
+                f"trace={r['trace']}"
+            )
 
     return rows
+
 
 def auto_select_backend(text):
     rows = compare_backends(text, verbose=False)
 
-    # RL prior: lightly favor historically strong backend, but current score dominates.
     for r in rows:
         prior = BACKEND_STATS[r["backend"]].get("avg", 0.0)
         r["auto_score"] = float(r["meta"]["score"]) + 0.10 * float(prior)
@@ -194,8 +238,10 @@ def auto_select_backend(text):
     rows.sort(key=lambda r: r["auto_score"], reverse=True)
     return rows[0], rows
 
+
 def readable_reply(user, tokens, meta, backend):
     q = user.lower()
+
     if "who are you" in q:
         lead = "I am SigilAGI: a glyph-native symbolic/neural chat engine with auto-selectable semantic seed backends."
     elif any(x in q for x in ("hello", "hi", "hey")):
@@ -210,13 +256,20 @@ def readable_reply(user, tokens, meta, backend):
     return (
         f"{lead}\n"
         f"Trace: {trace(tokens)}\n"
-        f"Metrics: entropy={meta['entropy']:.3f}, score={meta['score']:.3f}, "
-        f"length={meta['length']}, backend={backend}, auto={AUTO_BACKEND}, neural={USE_NEURAL}"
+        f"Metrics: entropy={meta['entropy']:.3f}, "
+        f"score={meta['score']:.3f}, "
+        f"length={meta['length']}, "
+        f"backend={backend}, "
+        f"auto={AUTO_BACKEND}, "
+        f"neural={USE_NEURAL}"
     )
+
 
 def save_turn(user, reply, tokens, meta, backend, comparison=None):
     Path("chat_exports").mkdir(exist_ok=True)
+
     render_tokens_png(tokens, "chat_exports/latest_reply.png")
+
     Path("chat_exports/latest_reply.json").write_text(json.dumps({
         "time": time.time(),
         "user": user,
@@ -227,8 +280,9 @@ def save_turn(user, reply, tokens, meta, backend, comparison=None):
         "tokens": tokens,
         "glyphs": tok.decode(tokens),
         "meta": meta,
-        "comparison": comparison
+        "comparison": comparison,
     }, indent=2))
+
 
 def chat():
     global SEED_BACKEND
@@ -237,12 +291,17 @@ def chat():
     print("Commands: /mode <balanced|water|flow|transform>, /seed <hash|trainable|vil>, /auto on/off, /compare <text>, /rewards, /neural on/off, /clear, /status, exit")
 
     while True:
-        user = input("\nYou> ").strip()
+        try:
+            user = input("\nYou> ").strip()
+        except KeyboardInterrupt:
+            print("\n[INTERRUPT] Saving state...")
+            safe_save()
+            sys.exit(0)
 
         if user.lower() in ("exit", "quit"):
-            embedding_model.save()
-            save_rewards()
-            break
+            print("[EXIT] Saving state...")
+            safe_save()
+            sys.exit(0)
 
         if parse_command(user):
             continue
@@ -264,8 +323,9 @@ def chat():
                     "score": r["score"],
                     "entropy": r["entropy"],
                     "length": r["length"],
-                    "auto_score": round(r["auto_score"], 3)
-                } for r in rows
+                    "auto_score": round(r["auto_score"], 3),
+                }
+                for r in rows
             ]
             SEED_BACKEND = backend
             print("[AUTO SELECT]", backend)
@@ -285,6 +345,7 @@ def chat():
         print("SigilAGI>", reply)
         print("[REWARD]", round(reward, 3))
         print("[PNG] chat_exports/latest_reply.png")
+
 
 if __name__ == "__main__":
     chat()
