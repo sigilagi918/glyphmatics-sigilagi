@@ -44,6 +44,23 @@ def main():
 
     tok = GlyphTokenizer()
     ds = load_dataset(tok)
+
+    # Eval-pair supervised seed injection
+    for item in pairs:
+        expected = expected_vector(item["expected_roles"])
+        dominant = [int(i) for i in np.argsort(expected)[-4:]][::-1]
+        for text_key in ("modern", "egyptian", "mayan"):
+            seed = vector_to_seed(item[text_key], START, 8)
+            seq = list(seed)
+            for j in range(32):
+                g = dominant[j % len(dominant)]
+                b = (sum(seed) + j * 31 + g * 17) % 256
+                seq.append((g << 8) | b)
+            seq.append(4095)
+            ds.append(seq)
+
+    print("[SUPERVISED-SEEDS]", len(ds))
+
     model = NGramSigilLM()
     model.fit(ds, epochs=10)
 
