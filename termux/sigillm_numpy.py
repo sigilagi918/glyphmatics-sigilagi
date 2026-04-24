@@ -2,6 +2,7 @@ import json, random, math
 from pathlib import Path
 from collections import Counter
 import numpy as np
+from sigil_transformer import TinyTransformer
 from glyph_semantic_bridge import vector_to_seed
 from glyph_trainable_embedding import TrainableGlyphEmbedding
 
@@ -117,6 +118,10 @@ def load_dataset(tok):
 
 class NGramSigilLM:
     def __init__(self):
+        self.transformer = TinyTransformer()
+        self.use_transformer = False
+
+    def __init__(self):
         self.tri={}
         self.bi={}
         self.uni=Counter()
@@ -133,6 +138,12 @@ class NGramSigilLM:
                     self.uni[t]+=1
             print("[EPOCH]",ep+1,"bi",len(self.bi),"tri",len(self.tri))
     def next(self,hist,banned,target_roles=None,steer=1.5):
+        if self.use_transformer and len(hist) > 4:
+            try:
+                return self.transformer.next_token(hist[-16:])
+            except:
+                pass
+
         c=self.tri.get((hist[-2],hist[-1])) if len(hist)>=2 else None
         if not c: c=self.bi.get(hist[-1])
         if not c: c=self.uni

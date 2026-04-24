@@ -1,5 +1,18 @@
+# Runtime state
+*.npz
+*.json
+
+# Exceptions (keep configs if needed)
+!README.md
+
+# Python
 __pycache__/
 *.pyc
-exports/
+
+# Chat outputs
 chat_exports/
-glyph_exports/
+exports/
+
+# Termux storage
+storage/
+

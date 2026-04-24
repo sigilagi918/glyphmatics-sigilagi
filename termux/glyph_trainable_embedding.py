@@ -22,35 +22,37 @@ class TrainableGlyphEmbedding:
         self.counts = defaultdict(int)
 
     def encode_text(self, text):
-        words = [w.lower() for w in text.split() if w.strip()]
-        if not words:
-            return np.zeros(self.dim, dtype=np.float32)
+        parts = [x for x in text.lower().split() if x.strip()]
+        if not parts:
+            parts = list(text)
 
         vec = np.zeros(self.dim, dtype=np.float32)
-        for w in words:
-            if w not in self.word_vecs:
-                self.word_vecs[w] = _hash_vec(w)
-            vec += np.array(self.word_vecs[w], dtype=np.float32)
+        for p in parts:
+            if p not in self.word_vecs:
+                self.word_vecs[p] = _hash_vec(p).tolist()
+            vec += np.array(self.word_vecs[p], dtype=np.float32)
 
-        return vec / max(1, len(words))
+        return vec / max(1, len(parts))
 
-    def update(self, text, reward=1.0, lr=0.05):
-        words = [w.lower() for w in text.split() if w.strip()]
-        if not words:
-            return
+    def encode(self, text):
+        return self.encode_text(text)
 
+    def update(self, text, reward=1.0, lr=0.03):
         direction = _hash_vec(text)
         direction = direction / max(1e-9, np.linalg.norm(direction))
 
-        for w in words:
-            if w not in self.word_vecs:
-                self.word_vecs[w] = _hash_vec(w)
+        parts = [x for x in text.lower().split() if x.strip()]
+        if not parts:
+            parts = list(text)
 
-            v = np.array(self.word_vecs[w], dtype=np.float32)
-            v = v + lr * reward * direction
-            v = np.clip(v, 0.0, 1.0)
-            self.word_vecs[w] = v.tolist()
-            self.counts[w] += 1
+        for p in parts:
+            if p not in self.word_vecs:
+                self.word_vecs[p] = _hash_vec(p).tolist()
+
+            v = np.array(self.word_vecs[p], dtype=np.float32)
+            v = np.clip(v + lr * float(reward) * direction, 0.0, 1.0)
+            self.word_vecs[p] = v.tolist()
+            self.counts[p] += 1
 
     def vector_to_seed(self, text, start=4094, n=8):
         vec = self.encode_text(text)
@@ -63,19 +65,23 @@ class TrainableGlyphEmbedding:
         return out
 
     def save(self, path=EMB_PATH):
-        data = {
+        Path(path).write_text(json.dumps({
             "dim": self.dim,
             "word_vecs": self.word_vecs,
             "counts": dict(self.counts)
-        }
-        Path(path).write_text(json.dumps(data))
+        }))
 
     def load(self, path=EMB_PATH):
         p = Path(path)
         if not p.exists():
             return False
-        data = json.loads(p.read_text())
-        self.dim = data.get("dim", DIM)
-        self.word_vecs = data.get("word_vecs", {})
-        self.counts = defaultdict(int, {k:int(v) for k,v in data.get("counts", {}).items()})
+        d = json.loads(p.read_text())
+        self.dim = d.get("dim", DIM)
+        self.word_vecs = d.get("word_vecs", {})
+        self.counts = defaultdict(int, {k:int(v) for k,v in d.get("counts", {}).items()})
         return True
+
+# backward-compatible alias
+TrainableEmbedding = TrainableGlyphEmbedding
+embedding_model = TrainableGlyphEmbedding()
+embedding_model.load()
