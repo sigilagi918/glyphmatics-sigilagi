@@ -3,36 +3,30 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SigilAGI — GlyphMatics Execution</title>
+<title>SigilAGI — Live Execution</title>
 
 <style>
 body {
     background: #0b0b0b;
     color: #eaeaea;
     font-family: monospace;
-    margin: 0;
     padding: 20px;
 }
-h1 { color: #00ffcc; }
 
-.container {
-    max-width: 900px;
-    margin: auto;
-}
+h1 { color: #00ffcc; }
 
 .box {
     background: #111;
     border: 1px solid #222;
     padding: 12px;
-    margin-bottom: 15px;
+    margin-bottom: 12px;
 }
 
-input, button, select {
+input, button {
     background: #000;
     color: #00ffcc;
     border: 1px solid #333;
     padding: 8px;
-    font-family: monospace;
 }
 
 button:hover {
@@ -43,87 +37,84 @@ button:hover {
 
 canvas {
     border: 1px solid #333;
-    background: #000;
 }
 </style>
 </head>
 
 <body>
-<div class="container">
 
-<h1>SigilAGI — GlyphMatics / VIL Execution</h1>
+<h1>SigilAGI — GlyphMatics Execution</h1>
 
 <div class="box">
-    <input id="inputBox" placeholder="Enter prompt" style="width:70%">
+    <input id="inputBox" value="who are you" style="width:70%">
     <button onclick="runSigil()">Execute</button>
 </div>
 
-<div class="box">
-    <b>Response</b>
-    <div id="response"></div>
-</div>
+<div class="box"><b>Status</b><div id="status">idle</div></div>
+
+<div class="box"><b>Response</b><div id="response"></div></div>
+<div class="box"><b>Glyph Lattice</b><div id="lattice"></div></div>
+<div class="box"><b>Tri-Sigil</b><div id="sigil"></div></div>
+<div class="box"><b>Inspect</b><pre id="inspect"></pre></div>
 
 <div class="box">
-    <b>Glyph Lattice (Text)</b>
-    <div id="lattice"></div>
-</div>
-
-<div class="box">
-    <b>Glyph Renderer</b><br>
-    <canvas id="glyphCanvas" width="512" height="512"></canvas>
-</div>
-
-<div class="box">
-    <b>Tri-Sigil Output</b>
-    <div id="sigil"></div>
-</div>
-
-<div class="box">
-    <b>Inspect</b>
-    <pre id="inspect"></pre>
-</div>
-
-<div class="box">
-    <b>Model Family Sigils</b><br>
-    <select id="modelSelect">
-        <option value="sigilagi">sigilagi</option>
-        <option value="vil">vil</option>
-        <option value="qwen">qwen</option>
-        <option value="llama">llama</option>
-    </select>
-    <button onclick="loadModelSigil()">Load</button>
-    <div id="modelSigil"></div>
-</div>
-
+<b>Renderer</b><br>
+<canvas id="glyphCanvas" width="512" height="512"></canvas>
 </div>
 
 <script>
 
-// === ENDPOINTS ===
-const PRIMARY_API = "https://nine1eight-vil-glyphmatic-demo.hf.space/run/predictive";
-const FALLBACK_API = "https://nine1eight-vil-glyphmatic-demo.hf.space/api/predict";
+// ===== CONFIG =====
+const API_URL = "https://nine1eight-vil-glyphmatic-demo.hf.space/api/predict";
 
-// === EXECUTION ===
+// ===== MAIN =====
 async function runSigil() {
-    const input = document.getElementById("inputBox").value;
 
-    let data;
+    const input = document.getElementById("inputBox").value;
+    setStatus("sending request...");
 
     try {
-        data = await callAPI(PRIMARY_API, input);
-    } catch (e) {
-        console.warn("Primary failed, switching to fallback...");
-        data = await callAPI(FALLBACK_API, input, true);
-    }
+        const res = await fetch(API_URL, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+                data: [input, "web"]
+            })
+        });
 
-    document.getElementById("response").innerText = data[0];
-    document.getElementById("lattice").innerText = data[1];
-    document.getElementById("inspect").innerText = data[2];
+        if (!res.ok) {
+            throw new Error("HTTP " + res.status);
+        }
+
+        const json = await res.json();
+
+        console.log("API RAW:", json);
+
+        const data = json.data;
+
+        updateUI(data);
+
+        setStatus("success");
+
+    } catch (err) {
+        console.error(err);
+        setStatus("ERROR: " + err.message);
+        document.getElementById("response").innerText = "API FAILED";
+    }
+}
+
+// ===== UI UPDATE =====
+function updateUI(data) {
+
+    document.getElementById("response").innerText = data[0] || "";
+    document.getElementById("lattice").innerText = data[1] || "";
+    document.getElementById("inspect").innerText = data[2] || "";
 
     renderGlyphs(data[1]);
 
+    // parse sigil
     try {
-        const inspect = JSON.parse(data[2].replace(/'/g, '"'));
+        const inspect = JSON.parse((data[2] || "").replace(/'/g,'"'));
         document.getElementById("sigil").innerText =
             inspect.sigil?.id || inspect.tri_sigil?.id || "none";
     } catch(e) {
@@ -131,28 +122,14 @@ async function runSigil() {
     }
 }
 
-// === API CALL ===
-async function callAPI(url, input, alt=false) {
-
-    const payload = alt
-        ? {data: [input, "web"]}
-        : {user_input: input, session_id: "web"};
-
-    const res = await fetch(url, {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify(payload)
-    });
-
-    if (!res.ok) throw new Error("API failed");
-
-    const json = await res.json();
-
-    return alt ? json.data : json;
+// ===== STATUS =====
+function setStatus(msg) {
+    document.getElementById("status").innerText = msg;
 }
 
-// === GLYPH RENDERER ===
+// ===== GLYPH RENDER =====
 function renderGlyphs(latticeStr) {
+
     const canvas = document.getElementById("glyphCanvas");
     const ctx = canvas.getContext("2d");
 
@@ -161,37 +138,30 @@ function renderGlyphs(latticeStr) {
     if (!latticeStr) return;
 
     const tokens = latticeStr.match(/G\d+/g) || [];
-    const gridSize = Math.ceil(Math.sqrt(tokens.length));
-    const cell = 512 / gridSize;
+
+    if (tokens.length === 0) {
+        ctx.fillStyle = "#f00";
+        ctx.fillText("NO TOKENS", 10, 20);
+        return;
+    }
+
+    const grid = Math.ceil(Math.sqrt(tokens.length));
+    const size = 512 / grid;
 
     tokens.forEach((g, i) => {
-        const x = (i % gridSize) * cell;
-        const y = Math.floor(i / gridSize) * cell;
+
+        const x = (i % grid) * size;
+        const y = Math.floor(i / grid) * size;
 
         const id = parseInt(g.replace("G",""));
 
-        ctx.fillStyle = id === 15 ? "#222" : "#00ffcc";
-        ctx.fillRect(x, y, cell, cell);
+        ctx.fillStyle = (id === 15) ? "#222" : "#00ffcc";
+        ctx.fillRect(x, y, size, size);
 
         ctx.fillStyle = "#000";
         ctx.font = "10px monospace";
-        ctx.fillText(g, x + 2, y + 12);
+        ctx.fillText(g, x+2, y+12);
     });
-}
-
-// === MODEL SIGILS ===
-function loadModelSigil() {
-    const model = document.getElementById("modelSelect").value;
-
-    const sigils = {
-        sigilagi: "G0→G15 deterministic lattice",
-        vil: "Temporal embedding lattice",
-        qwen: "Latent token transformer field",
-        llama: "Causal attention chain"
-    };
-
-    document.getElementById("modelSigil").innerText =
-        sigils[model] || "unknown";
 }
 
 </script>
