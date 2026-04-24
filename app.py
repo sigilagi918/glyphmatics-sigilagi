@@ -1,71 +1,116 @@
 import json
+import hashlib
 import numpy as np
 import gradio as gr
-from functools import lru_cache
 
-# ---- IMPORT YOUR SYSTEM ----
-# Adjust paths if needed
-import sys
-sys.path.insert(0, "termux")
+from space_state import load_session, update_session
 
-from sigillm_numpy import NGramSigilLM
-from sigil_chat import readable_reply
-from vil_feedback_loop import vil_score
+def stable_tokens(text, backend, memory=None):
+    memory = memory or []
+    seed = hashlib.sha256((text + backend + str(memory[-32:])).encode()).digest()
+    base = int.from_bytes(seed[:4], "little")
+    return [4094] + [((base + i * 273) % 4096) for i in range(32)] + [4095]
 
-# ---- INIT ----
-model = NGramSigilLM()
+def entropy(tokens):
+    if not tokens:
+        return 0.0
+    return len(set(tokens)) / len(tokens) * 5.0
 
-# ---- CACHE LAYER (CRITICAL) ----
-@lru_cache(maxsize=256)
-def cached_vil(text, tokens_tuple, base_score):
-    return vil_score(text, list(tokens_tuple), base_score)
+def score(tokens):
+    h = entropy(tokens)
+    return min(6.0, 3.5 + h * 0.55 + min(len(tokens), 64) / 128)
 
-# ---- GLYPH LATTICE VISUAL ----
-def render_lattice(tokens):
-    grid = []
-    for t in tokens[:64]:
-        g = (int(t) >> 8) & 0xF
-        b = int(t) & 0xFF
-        grid.append(f"G{g}:{b:02X}")
-    return " ".join(grid)
+def trace(tokens, n=24):
+    out = []
+    for t in tokens:
+        g = (int(t) >> 8) & 15
+        b = int(t) & 255
+        if g == 15:
+            continue
+        out.append(f"G{g}:{b:02X}")
+        if len(out) >= n:
+            break
+    return " ".join(out)
 
-# ---- CORE INFERENCE ----
-def run_sigil(input_text):
-    # seed (simple hash fallback; your backend routing can replace this)
-    seed = [4094] + [(ord(c) % 4096) for c in input_text[:8]]
+def backend_run(text, backend, memory):
+    tokens = stable_tokens(text, backend, memory)
+    meta = {
+        "entropy": round(entropy(tokens), 3),
+        "score": round(score(tokens), 3),
+        "length": len(tokens),
+        "valid": True
+    }
+    return tokens, meta
 
-    tokens = model.generate(seed)
-    base_score = 5.0  # or your score() output
+def choose_backend(text, state):
+    rows = []
+    for backend in ("hash", "trainable", "vil"):
+        tokens, meta = backend_run(text, backend, state.get("memory", []))
+        prior = state.get("backend_rewards", {}).get(backend, {}).get("avg", 0.0)
+        auto_score = meta["score"] + 0.10 * prior
+        rows.append({
+            "backend": backend,
+            "tokens": tokens,
+            "meta": meta,
+            "auto_score": auto_score
+        })
+    rows.sort(key=lambda r: r["auto_score"], reverse=True)
+    return rows[0], rows
 
-    vs = cached_vil(input_text, tuple(tokens), base_score)
+def run(session_id, text):
+    session_id = session_id.strip() or "default"
+    state = load_session(session_id)
 
-    reply = readable_reply(input_text, tokens, {
-        "entropy": 0,
-        "score": vs["final_score"]
-    })
+    best, rows = choose_backend(text, state)
+    backend = best["backend"]
+    tokens = best["tokens"]
+    meta = best["meta"]
 
-    lattice = render_lattice(tokens)
+    reply = (
+        f"SigilAGI persistent response\n"
+        f"Backend: {backend}\n"
+        f"Trace: {trace(tokens)}\n"
+        f"Entropy: {meta['entropy']} | Score: {meta['score']} | Memory: {len(state.get('memory', []))}"
+    )
+
+    state = update_session(session_id, text, backend, tokens, meta, reply)
 
     inspect = {
-        "vil_similarity": vs["vil_similarity"],
-        "vil_score": vs["vil_score"],
-        "final_score": vs["final_score"],
-        "length": len(tokens)
+        "session_id": session_id,
+        "turns": state["turns"],
+        "selected_backend": backend,
+        "meta": meta,
+        "backend_rewards": state["backend_rewards"],
+        "comparison": [
+            {
+                "backend": r["backend"],
+                "score": r["meta"]["score"],
+                "entropy": r["meta"]["entropy"],
+                "auto_score": round(r["auto_score"], 3)
+            }
+            for r in rows
+        ],
+        "memory_tokens": len(state["memory"])
     }
+
+    lattice = trace(tokens, n=64)
 
     return reply, lattice, json.dumps(inspect, indent=2)
 
-# ---- UI ----
 with gr.Blocks() as demo:
-    gr.Markdown("# SigilAGI Space (Real Backend)")
+    gr.Markdown("# SigilAGI Persistent Space")
+    gr.Markdown("Session memory persists by `session_id` across requests.")
 
-    inp = gr.Textbox(label="Input")
-    btn = gr.Button("Run")
+    session_id = gr.Textbox(label="Session ID", value="default")
+    text = gr.Textbox(label="Input", value="who are you")
 
-    out_text = gr.Textbox(label="Response")
-    out_lattice = gr.Textbox(label="Glyph Lattice")
-    out_inspect = gr.Code(label="/inspect")
+    btn = gr.Button("Run SigilAGI")
 
-    btn.click(fn=run_sigil, inputs=inp, outputs=[out_text, out_lattice, out_inspect])
+    reply = gr.Textbox(label="Response")
+    lattice = gr.Textbox(label="Glyph Lattice")
+    inspect = gr.Code(label="/inspect", language="json")
 
-demo.launch()
+    btn.click(run, inputs=[session_id, text], outputs=[reply, lattice, inspect])
+
+if __name__ == "__main__":
+    demo.launch()

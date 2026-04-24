@@ -22,3 +22,4 @@ termux/backend_rewards.json
 termux/trainable_embedding.json
 termux/vil_adapter_state.json
 termux/neural_model.npz
+space_sessions/
