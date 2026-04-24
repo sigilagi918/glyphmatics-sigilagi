@@ -37,10 +37,10 @@ function setStatus(x){document.getElementById("status").innerText=x;}
 
 async function runSigil(){
   const input = document.getElementById("inputBox").value;
-  setStatus("calling /call/predict...");
+  setStatus("calling /gradio_api/call/predict...");
 
   try {
-    const start = await fetch(`${SPACE}/call/predict`, {
+    const start = await fetch(`${SPACE}/gradio_api/call/predict`, {
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({data:[input,"web"]})
@@ -54,7 +54,7 @@ async function runSigil(){
 
     setStatus("waiting for event " + eventId);
 
-    const result = await fetch(`${SPACE}/call/predict/${eventId}`);
+    const result = await fetch(`${SPACE}/gradio_api/call/predict/${eventId}`);
     if(!result.ok) throw new Error("GET HTTP " + result.status);
 
     const text = await result.text();
