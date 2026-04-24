@@ -1,0 +1,30 @@
+[
+  {
+    "id": "water_flow_001",
+    "modern": "water flow",
+    "egyptian": "𓈖 flow",
+    "mayan": "ꙹ flow",
+    "expected_roles": {"3": 0.20, "7": 0.25, "12": 0.25}
+  },
+  {
+    "id": "power_life_001",
+    "modern": "life power",
+    "egyptian": "𓋹 power",
+    "mayan": "꙰ power",
+    "expected_roles": {"0": 0.20, "10": 0.25, "12": 0.15}
+  },
+  {
+    "id": "cycle_time_001",
+    "modern": "cycle time",
+    "egyptian": "𓇋 cycle",
+    "mayan": "꙱ cycle",
+    "expected_roles": {"6": 0.15, "9": 0.30, "12": 0.15}
+  },
+  {
+    "id": "memory_lock_001",
+    "modern": "memory lock",
+    "egyptian": "𓏏 memory",
+    "mayan": "ꙻ memory",
+    "expected_roles": {"5": 0.25, "14": 0.25, "8": 0.15}
+  }
+]
