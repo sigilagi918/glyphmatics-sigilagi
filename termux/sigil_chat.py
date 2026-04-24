@@ -123,6 +123,27 @@ def readable_reply(user, tokens, meta):
         f"length={meta['length']}, seed={SEED_BACKEND}, neural={USE_NEURAL}"
     )
 
+def compare_backends(text):
+    rows = []
+    for backend in ("hash", "trainable", "vil"):
+        seed = make_seed(text, backend=backend, start=START, n=8)
+        seed = inject_memory(seed)
+        tokens = generate(seed)
+        meta = score(tokens, CURRENT_TARGET) if CURRENT_TARGET else score(tokens)
+        rows.append({
+            "backend": backend,
+            "entropy": round(meta["entropy"], 3),
+            "score": round(meta["score"], 3),
+            "length": meta["length"],
+            "trace": trace(tokens, n=12)
+        })
+
+    print("[COMPARE]", text)
+    for r in rows:
+        print(f"{r['backend']:10s} H={r['entropy']} score={r['score']} len={r['length']} trace={r['trace']}")
+    return rows
+
+
 def save_turn(user, reply, tokens, meta):
     Path("chat_exports").mkdir(exist_ok=True)
     render_tokens_png(tokens, "chat_exports/latest_reply.png")
@@ -148,6 +169,10 @@ def chat():
             break
 
         if parse_command(user):
+            continue
+
+        if user.startswith("/compare "):
+            compare_backends(user.split(" ", 1)[1].strip())
             continue
 
         seed = make_seed(user, backend=SEED_BACKEND, start=START, n=8)
