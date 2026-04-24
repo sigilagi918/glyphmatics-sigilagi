@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from collections import deque, defaultdict
+from collections import defaultdict
 from pathlib import Path
 import json
 import sys
@@ -18,8 +18,14 @@ from sigillm_numpy import (
 from vil_chat_bridge import make_seed, update_backend
 from glyph_trainable_embedding import embedding_model
 from sigil_neural_model import NeuralGlyphModel
-
-REWARD_PATH = Path("backend_rewards.json")
+from persistent_agent import (
+    load_agent_state,
+    save_agent_state,
+    make_memory,
+    make_backend_stats,
+    persist_runtime,
+    log_turn,
+)
 
 tok = GlyphTokenizer()
 
@@ -33,26 +39,15 @@ model.fit(ds, epochs=10)
 neural_model = NeuralGlyphModel()
 neural_model.load()
 
+AGENT_STATE = load_agent_state()
+
 USE_NEURAL = False
-CURRENT_TARGET = None
-SEED_BACKEND = "trainable"
-AUTO_BACKEND = False
-MEMORY = deque(maxlen=128)
-
-
-def load_rewards():
-    if not REWARD_PATH.exists():
-        return defaultdict(lambda: {"uses": 0, "reward": 0.0, "avg": 0.0})
-
-    data = json.loads(REWARD_PATH.read_text())
-    return defaultdict(lambda: {"uses": 0, "reward": 0.0, "avg": 0.0}, data)
-
-
-BACKEND_STATS = load_rewards()
-
-
-def save_rewards():
-    REWARD_PATH.write_text(json.dumps(dict(BACKEND_STATS), indent=2))
+CURRENT_TARGET = target_profile(AGENT_STATE["mode"]) if AGENT_STATE.get("mode") else None
+CURRENT_MODE = AGENT_STATE.get("mode")
+SEED_BACKEND = AGENT_STATE.get("last_backend", "trainable")
+AUTO_BACKEND = bool(AGENT_STATE.get("auto_backend", False))
+MEMORY = make_memory(maxlen=256)
+BACKEND_STATS = make_backend_stats()
 
 
 def safe_save():
@@ -62,7 +57,7 @@ def safe_save():
         pass
 
     try:
-        save_rewards()
+        persist_runtime(MEMORY, BACKEND_STATS, SEED_BACKEND, AUTO_BACKEND, CURRENT_MODE)
     except Exception:
         pass
 
@@ -83,17 +78,19 @@ def reward_backend(backend, meta, text):
     if reward > 4.5:
         update_backend(text, backend, reward=min(reward / 5.0, 2.0))
 
-    save_rewards()
+    safe_save()
     return reward
 
 
 def parse_command(text):
-    global CURRENT_TARGET, USE_NEURAL, SEED_BACKEND, AUTO_BACKEND
+    global CURRENT_TARGET, CURRENT_MODE, USE_NEURAL, SEED_BACKEND, AUTO_BACKEND
 
     if text.startswith("/mode"):
         mode = text.split(" ", 1)[-1].strip()
+        CURRENT_MODE = mode
         CURRENT_TARGET = target_profile(mode)
         print("[MODE]", mode)
+        safe_save()
         return True
 
     if text.startswith("/seed"):
@@ -105,16 +102,19 @@ def parse_command(text):
         SEED_BACKEND = backend
         AUTO_BACKEND = False
         print("[SEED]", SEED_BACKEND)
+        safe_save()
         return True
 
     if text == "/auto on":
         AUTO_BACKEND = True
         print("[AUTO BACKEND ON]")
+        safe_save()
         return True
 
     if text == "/auto off":
         AUTO_BACKEND = False
         print("[AUTO BACKEND OFF]")
+        safe_save()
         return True
 
     if text == "/neural on":
@@ -130,6 +130,7 @@ def parse_command(text):
     if text == "/clear":
         MEMORY.clear()
         print("[MEMORY CLEARED]")
+        safe_save()
         return True
 
     if text == "/rewards":
@@ -139,7 +140,7 @@ def parse_command(text):
     if text == "/status":
         print(json.dumps({
             "memory_size": len(MEMORY),
-            "mode_active": CURRENT_TARGET is not None,
+            "mode": CURRENT_MODE,
             "seed_backend": SEED_BACKEND,
             "auto_backend": AUTO_BACKEND,
             "neural": USE_NEURAL,
@@ -153,7 +154,7 @@ def parse_command(text):
 def inject_memory(seed):
     if not MEMORY:
         return seed
-    return seed + list(MEMORY)[-8:]
+    return seed + list(MEMORY)[-12:]
 
 
 def trace(tokens, n=24):
@@ -177,11 +178,8 @@ def trace(tokens, n=24):
 def generate(seed):
     if USE_NEURAL:
         tokens = list(seed)
-
         for _ in range(32):
-            nxt = neural_model.next_token(tokens)
-            tokens.append(nxt)
-
+            tokens.append(neural_model.next_token(tokens))
         return tokens
 
     return model.generate(seed)
@@ -243,7 +241,7 @@ def readable_reply(user, tokens, meta, backend):
     q = user.lower()
 
     if "who are you" in q:
-        lead = "I am SigilAGI: a glyph-native symbolic/neural chat engine with auto-selectable semantic seed backends."
+        lead = "I am SigilAGI: a persistent glyph-native symbolic/neural agent with memory, reinforcement routing, and selectable semantic seed backends."
     elif any(x in q for x in ("hello", "hi", "hey")):
         lead = "Signal received."
     elif any(x in q for x in ("build", "make", "create", "write")):
@@ -261,7 +259,8 @@ def readable_reply(user, tokens, meta, backend):
         f"length={meta['length']}, "
         f"backend={backend}, "
         f"auto={AUTO_BACKEND}, "
-        f"neural={USE_NEURAL}"
+        f"neural={USE_NEURAL}, "
+        f"memory={len(MEMORY)}"
     )
 
 
@@ -277,6 +276,7 @@ def save_turn(user, reply, tokens, meta, backend, comparison=None):
         "backend": backend,
         "auto_backend": AUTO_BACKEND,
         "neural": USE_NEURAL,
+        "memory_size": len(MEMORY),
         "tokens": tokens,
         "glyphs": tok.decode(tokens),
         "meta": meta,
@@ -288,6 +288,7 @@ def chat():
     global SEED_BACKEND
 
     print("[SIGIL CHAT READY]")
+    print("Persistent agent active.")
     print("Commands: /mode <balanced|water|flow|transform>, /seed <hash|trainable|vil>, /auto on/off, /compare <text>, /rewards, /neural on/off, /clear, /status, exit")
 
     while True:
@@ -341,6 +342,7 @@ def chat():
 
         reply = readable_reply(user, tokens, meta, backend)
         save_turn(user, reply, tokens, meta, backend, comparison=comparison)
+        log_turn(user, reply, backend, meta)
 
         print("SigilAGI>", reply)
         print("[REWARD]", round(reward, 3))
