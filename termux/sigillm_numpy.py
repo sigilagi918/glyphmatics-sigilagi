@@ -3,6 +3,7 @@ from pathlib import Path
 from collections import Counter
 import numpy as np
 from glyph_semantic_bridge import vector_to_seed
+from glyph_trainable_embedding import TrainableGlyphEmbedding
 
 START=4094
 STOP=4095
@@ -272,6 +273,8 @@ def archive_elites():
 
 def main():
     tok=GlyphTokenizer()
+    emb=TrainableGlyphEmbedding()
+    emb.load()
     ds=load_dataset(tok)
     model=NGramSigilLM()
     model.fit(ds,epochs=10)
@@ -281,16 +284,19 @@ def main():
     export_ranked(normal,tok,prefix="rank",top_k=5)
 
     water_target=target_profile("water")
-    controlled=generate_multi(model,vector_to_seed("water 𓈖 ꙹ flow",START,8),N=24,target=water_target)
+    controlled=generate_multi(model,emb.vector_to_seed("water 𓈖 ꙹ flow",START,8),N=24,target=water_target)
     export_ranked(controlled,tok,prefix="controlled",top_k=5)
 
-    semantic=model.generate(vector_to_seed("semantic glyph compression active",START,8))
-    Path("exports/semantic_aligned.json").write_text(json.dumps({"input":"semantic glyph compression active","tokens":semantic,"glyphs":tok.decode(semantic),"meta":score(semantic)},indent=2))
+    semantic=model.generate(emb.vector_to_seed("semantic glyph compression active",START,8))
+    semantic_meta=score(semantic)
+    Path("exports/semantic_aligned.json").write_text(json.dumps({"input":"semantic glyph compression active","tokens":semantic,"glyphs":tok.decode(semantic),"meta":semantic_meta},indent=2))
     render_tokens_png(semantic,"exports/semantic_aligned.png")
 
     influence_report(model,tok)
 
-    Path("sigillm_state.json").write_text(json.dumps({"status":"controlled_semantic_steering_active","best":normal[0][1],"controlled_best":controlled[0][1]},indent=2))
+    emb.update("semantic glyph compression active", reward=semantic_meta["score"] if "semantic_meta" in locals() else 1.0)
+    emb.save()
+    Path("sigillm_state.json").write_text(json.dumps({"status":"controlled_semantic_steering_active_trainable_embedding","best":normal[0][1],"controlled_best":controlled[0][1]},indent=2))
     sync_exports_to_downloads()
     archive_elites()
     print("[DONE] controlled semantic steering + influence measurement complete")
