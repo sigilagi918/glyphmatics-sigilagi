@@ -1,21 +1,17 @@
 ---
-title: SigilAGI Glyph Engine
+title: SigilAGI Stable Space
 emoji: 🔮
 colorFrom: purple
 colorTo: pink
 sdk: gradio
-sdk_version: 4.36.1
 app_file: app.py
-pinned: false
 ---
 
-# SigilAGI Glyph Engine
+# SigilAGI Stable Space
 
-Deterministic symbolic + neural hybrid system:
+This is a **guaranteed working baseline Space**.
 
-- Hash / Trainable / VIL seed backends
-- Reinforcement backend routing
-- 768-dim VIL embedding feedback loop
-- Glyph token trace output
-
-Paste text → compare semantic paths.
+Next step:
+- reconnect real GlyphMatics backend
+- restore VIL embedding loop
+- add glyph rendering

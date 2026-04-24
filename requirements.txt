@@ -1,2 +1,2 @@
-gradio
+gradio==4.36.1
 numpy

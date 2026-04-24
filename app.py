@@ -1,56 +1,61 @@
-import os
 import json
-import traceback
 import numpy as np
 import gradio as gr
 
-# --- IMPORT CORE ---
-try:
-    from termux.sigil_chat import run_backend
-except:
-    # fallback safe stub
-    def run_backend(text, backend="hash"):
-        return {
-            "tokens": [4094, 803, 3613, 4095],
-            "meta": {"score": 1.0, "entropy": 1.0, "length": 4}
-        }
+# --- SIMPLE CORE (self-contained, no repo imports) ---
 
-from termux.vil_feedback_loop import vil_score
+def fake_backend(text, name):
+    base = abs(hash(text + name)) % 4096
 
-# --- CORE PIPELINE ---
-def process(text):
-    try:
-        results = []
+    tokens = [(base + i*17) % 4096 for i in range(24)]
 
-        for backend in ["hash", "trainable", "vil"]:
-            out = run_backend(text, backend)
+    entropy = float(len(set(tokens)) / len(tokens) * 5)
+    score = float((base % 100) / 10 + 4)
 
-            vs = vil_score(text, out["tokens"], out["meta"]["score"])
+    return tokens, {"entropy": entropy, "score": score, "length": len(tokens)}
 
-            results.append({
-                "backend": backend,
-                "score": out["meta"]["score"],
-                "entropy": out["meta"]["entropy"],
-                "length": out["meta"]["length"],
-                "vil_similarity": round(vs["vil_similarity"], 4),
-                "final_score": round(vs["final_score"], 3),
-                "trace": out["tokens"][:16]
-            })
+def cosine(a, b):
+    return float(np.dot(a, b) / (np.linalg.norm(a)+1e-8) / (np.linalg.norm(b)+1e-8))
 
-        results.sort(key=lambda x: x["final_score"], reverse=True)
+def embed(text):
+    np.random.seed(abs(hash(text)) % (2**32))
+    return np.random.uniform(-1, 1, 768)
 
-        return json.dumps(results, indent=2)
+# --- PIPELINE ---
 
-    except Exception as e:
-        return f"ERROR:\n{traceback.format_exc()}"
+def run(text):
+    results = []
+
+    for backend in ["hash", "trainable", "vil"]:
+        tokens, meta = fake_backend(text, backend)
+
+        v1 = embed(text)
+        v2 = embed(str(tokens))
+
+        sim = cosine(v1, v2)
+        final = 0.6 * meta["score"] + 0.4 * ((sim+1)/2)*10
+
+        results.append({
+            "backend": backend,
+            "score": round(meta["score"], 3),
+            "entropy": round(meta["entropy"], 3),
+            "length": meta["length"],
+            "similarity": round(sim, 4),
+            "final_score": round(final, 3),
+            "trace": tokens[:12]
+        })
+
+    results.sort(key=lambda x: x["final_score"], reverse=True)
+    return json.dumps(results, indent=2)
 
 # --- UI ---
+
 demo = gr.Interface(
-    fn=process,
-    inputs=gr.Textbox(label="Input Text"),
-    outputs=gr.Code(label="Backend Comparison (VIL-Weighted)"),
-    title="SigilAGI Glyph Engine (VIL + RL)",
-    description="Deterministic glyph generation with VIL embedding feedback loop"
+    fn=run,
+    inputs=gr.Textbox(label="Input"),
+    outputs=gr.Code(label="Backend Comparison"),
+    title="SigilAGI (Stable Space)",
+    description="Working baseline. Replace core with real engine once stable."
 )
 
 if __name__ == "__main__":
