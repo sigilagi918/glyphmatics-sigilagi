@@ -1,62 +1,71 @@
 import json
 import numpy as np
 import gradio as gr
+from functools import lru_cache
 
-# --- SIMPLE CORE (self-contained, no repo imports) ---
+# ---- IMPORT YOUR SYSTEM ----
+# Adjust paths if needed
+import sys
+sys.path.insert(0, "termux")
 
-def fake_backend(text, name):
-    base = abs(hash(text + name)) % 4096
+from sigillm_numpy import NGramSigilLM
+from sigil_chat import readable_reply
+from vil_feedback_loop import vil_score
 
-    tokens = [(base + i*17) % 4096 for i in range(24)]
+# ---- INIT ----
+model = NGramSigilLM()
 
-    entropy = float(len(set(tokens)) / len(tokens) * 5)
-    score = float((base % 100) / 10 + 4)
+# ---- CACHE LAYER (CRITICAL) ----
+@lru_cache(maxsize=256)
+def cached_vil(text, tokens_tuple, base_score):
+    return vil_score(text, list(tokens_tuple), base_score)
 
-    return tokens, {"entropy": entropy, "score": score, "length": len(tokens)}
+# ---- GLYPH LATTICE VISUAL ----
+def render_lattice(tokens):
+    grid = []
+    for t in tokens[:64]:
+        g = (int(t) >> 8) & 0xF
+        b = int(t) & 0xFF
+        grid.append(f"G{g}:{b:02X}")
+    return " ".join(grid)
 
-def cosine(a, b):
-    return float(np.dot(a, b) / (np.linalg.norm(a)+1e-8) / (np.linalg.norm(b)+1e-8))
+# ---- CORE INFERENCE ----
+def run_sigil(input_text):
+    # seed (simple hash fallback; your backend routing can replace this)
+    seed = [4094] + [(ord(c) % 4096) for c in input_text[:8]]
 
-def embed(text):
-    np.random.seed(abs(hash(text)) % (2**32))
-    return np.random.uniform(-1, 1, 768)
+    tokens = model.generate(seed)
+    base_score = 5.0  # or your score() output
 
-# --- PIPELINE ---
+    vs = cached_vil(input_text, tuple(tokens), base_score)
 
-def run(text):
-    results = []
+    reply = readable_reply(input_text, tokens, {
+        "entropy": 0,
+        "score": vs["final_score"]
+    })
 
-    for backend in ["hash", "trainable", "vil"]:
-        tokens, meta = fake_backend(text, backend)
+    lattice = render_lattice(tokens)
 
-        v1 = embed(text)
-        v2 = embed(str(tokens))
+    inspect = {
+        "vil_similarity": vs["vil_similarity"],
+        "vil_score": vs["vil_score"],
+        "final_score": vs["final_score"],
+        "length": len(tokens)
+    }
 
-        sim = cosine(v1, v2)
-        final = 0.6 * meta["score"] + 0.4 * ((sim+1)/2)*10
+    return reply, lattice, json.dumps(inspect, indent=2)
 
-        results.append({
-            "backend": backend,
-            "score": round(meta["score"], 3),
-            "entropy": round(meta["entropy"], 3),
-            "length": meta["length"],
-            "similarity": round(sim, 4),
-            "final_score": round(final, 3),
-            "trace": tokens[:12]
-        })
+# ---- UI ----
+with gr.Blocks() as demo:
+    gr.Markdown("# SigilAGI Space (Real Backend)")
 
-    results.sort(key=lambda x: x["final_score"], reverse=True)
-    return json.dumps(results, indent=2)
+    inp = gr.Textbox(label="Input")
+    btn = gr.Button("Run")
 
-# --- UI ---
+    out_text = gr.Textbox(label="Response")
+    out_lattice = gr.Textbox(label="Glyph Lattice")
+    out_inspect = gr.Code(label="/inspect")
 
-demo = gr.Interface(
-    fn=run,
-    inputs=gr.Textbox(label="Input"),
-    outputs=gr.Code(label="Backend Comparison"),
-    title="SigilAGI (Stable Space)",
-    description="Working baseline. Replace core with real engine once stable."
-)
+    btn.click(fn=run_sigil, inputs=inp, outputs=[out_text, out_lattice, out_inspect])
 
-if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+demo.launch()

@@ -1,2 +1,4 @@
-numpy
-torch
+gradio==4.36.1
+huggingface_hub==0.23.5
+numpy==1.26.4
+torch==2.2.2
