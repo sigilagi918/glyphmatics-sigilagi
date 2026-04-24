@@ -18,6 +18,7 @@ from sigillm_numpy import (
 from vil_chat_bridge import make_seed, update_backend
 from glyph_trainable_embedding import embedding_model
 from sigil_neural_model import NeuralGlyphModel
+from auto_backend_patch import enhance_with_vil
 from persistent_agent import (
     load_agent_state,
     save_agent_state,
@@ -228,10 +229,11 @@ def compare_backends(text, verbose=True):
 
 def auto_select_backend(text):
     rows = compare_backends(text, verbose=False)
+    rows = enhance_with_vil(text, rows)
 
     for r in rows:
         prior = BACKEND_STATS[r["backend"]].get("avg", 0.0)
-        r["auto_score"] = float(r["meta"]["score"]) + 0.10 * float(prior)
+        r["auto_score"] = float(r["final_score"]) + 0.10 * float(prior)
 
     rows.sort(key=lambda r: r["auto_score"], reverse=True)
     return rows[0], rows
@@ -325,6 +327,8 @@ def chat():
                     "entropy": r["entropy"],
                     "length": r["length"],
                     "auto_score": round(r["auto_score"], 3),
+                    "vil_similarity": round(r.get("vil_similarity", 0.0), 4),
+                    "final_score": round(r.get("final_score", r["score"]), 3),
                 }
                 for r in rows
             ]
